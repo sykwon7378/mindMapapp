@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MindFlow - Premium Mind Mapping</title>
+    <!-- Use Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/styles.css?v=2">
+</head>
+<body>
+    <!-- Overlay Modals (Top of body for robust stacking context) -->
+    <div id="delete-confirm-modal" class="modal-overlay hidden">
+        <div class="modal-content glass-panel danger-border">
+            <h3>마인드맵 삭제</h3>
+            <p id="delete-confirm-msg">정말 이 마인드맵을 삭제하시겠습니까?</p>
+            <div class="modal-footer">
+                <button id="btn-delete-cancel" class="btn secondary">취소</button>
+                <button id="btn-delete-confirm" class="btn danger">삭제</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="data-modal" class="modal-overlay hidden">
+        <div class="modal-content glass-panel">
+            <div class="modal-header">
+                <h3>Current Map Data (JSON)</h3>
+                <button id="close-modal" class="close-btn">&times;</button>
+            </div>
+            <pre id="json-display"></pre>
+            <div class="modal-footer">
+                <button id="copy-json" class="btn primary">Copy to Clipboard</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="editor-wrapper" class="hidden">
+        <div class="editor-container glass-panel">
+            <h3>Edit Node</h3>
+            <div class="input-group">
+                <label>Title</label>
+                <input type="text" id="edit-title" placeholder="Title" autocomplete="off" tabindex="1" />
+            </div>
+            <div class="input-group">
+                <label>Description</label>
+                <textarea id="edit-desc" placeholder="Enter detailed description..." spellcheck="false" tabindex="2"></textarea>
+            </div>
+            <div class="input-group row">
+                <div class="col">
+                    <label>Background</label>
+                    <input type="color" id="edit-bg-color" value="#1e293b" tabindex="3" />
+                </div>
+                <div class="col">
+                    <label>Text Color</label>
+                    <input type="color" id="edit-text-color" value="#ffffff" tabindex="4" />
+                </div>
+            </div>
+            <div class="input-group row">
+                <div class="col">
+                    <label>Title Size (px)</label>
+                    <input type="number" id="edit-title-size" value="16" min="8" max="72" tabindex="5" />
+                </div>
+                <div class="col">
+                    <label>Desc Size (px)</label>
+                    <input type="number" id="edit-desc-size" value="12" min="8" max="48" tabindex="6" />
+                </div>
+            </div>
+            <div class="input-group">
+                <label>Image Attachment</label>
+                <div class="image-upload-wrapper">
+                    <button id="btn-upload-image" class="btn secondary" tabindex="7">Upload/Paste Image</button>
+                    <input type="file" id="edit-image-file" accept="image/*" class="hidden" />
+                    <div id="image-preview-container" class="hidden">
+                        <img id="image-preview" src="" alt="Preview" />
+                        <button id="btn-remove-image" class="close-btn" tabindex="8">&times;</button>
+                    </div>
+                </div>
+                <div class="guide-hint small">Ctrl+V to paste image from clipboard</div>
+            </div>
+            <div class="editor-actions">
+                <button id="btn-editor-cancel" class="btn secondary" tabindex="9">취소</button>
+                <button id="btn-editor-save" class="btn primary" tabindex="10">등록</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="map-info-editor" class="modal-overlay hidden">
+        <div class="modal-content large-modal glass-panel">
+            <h3>Edit Mind Map Info</h3>
+            <div class="input-group">
+                <label>Map Title</label>
+                <input type="text" id="map-edit-title" placeholder="Enter map title..." autocomplete="off" />
+            </div>
+            <div class="input-group">
+                <label>Map Description</label>
+                <textarea id="map-edit-desc" placeholder="Enter map description..." spellcheck="false"></textarea>
+            </div>
+            <div class="editor-actions">
+                <button id="btn-map-info-cancel" class="btn secondary">취소</button>
+                <button id="btn-map-info-save" class="btn primary">저장</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="node-detail-modal" class="modal-overlay hidden">
+        <div class="detail-content glass-panel" id="detail-panel">
+            <!-- Resize handles (8 directions) -->
+            <div class="detail-resize-handle detail-resize-n"  data-dir="n"></div>
+            <div class="detail-resize-handle detail-resize-s"  data-dir="s"></div>
+            <div class="detail-resize-handle detail-resize-e"  data-dir="e"></div>
+            <div class="detail-resize-handle detail-resize-w"  data-dir="w"></div>
+            <div class="detail-resize-handle detail-resize-ne" data-dir="ne"></div>
+            <div class="detail-resize-handle detail-resize-nw" data-dir="nw"></div>
+            <div class="detail-resize-handle detail-resize-se" data-dir="se"></div>
+            <div class="detail-resize-handle detail-resize-sw" data-dir="sw"></div>
+            <!-- Drag-to-move header -->
+            <div class="detail-drag-header" id="detail-drag-header">
+                <h2 id="detail-title">Node Title</h2>
+                <button id="close-detail" class="close-btn">&times;</button>
+            </div>
+            <div id="detail-image-container" class="hidden">
+                <img id="detail-img" src="" alt="Node Image" />
+            </div>
+            <div class="detail-body">
+                <p id="detail-desc">Node description goes here...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Landing View (List of Maps) -->
+    <div id="landing-view" class="view">
+        <div class="landing-content">
+            <header class="landing-header">
+                <div class="logo">MindFlow <span>AI</span></div>
+                <div class="landing-actions">
+                    <div class="view-toggle">
+                        <button id="btn-view-grid" class="btn-icon active" title="Grid View">⊞</button>
+                        <button id="btn-view-table" class="btn-icon" title="Table View">≡</button>
+                    </div>
+                    <select id="landing-theme-select" class="btn secondary theme-select-common">
+                        <option value="default">Default Dark</option>
+                        <option value="neon">Neon Night</option>
+                        <option value="slate">Pro Slate</option>
+                        <option value="forest">Deep Forest</option>
+                        <option value="snow">Snow White</option>
+                        <option value="sky">Soft Sky</option>
+                        <option value="paper">Warm Paper</option>
+                    </select>
+                    <button id="btn-create-new" class="btn primary">+ New Mind Map</button>
+                </div>
+            </header>
+            
+            <section class="maps-section">
+                <h2>My Mind Maps</h2>
+                <div id="maps-list" class="maps-grid">
+                    <div class="loading-spinner">Loading maps...</div>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <!-- Main Workspace (Editor View) -->
+    <div id="editor-view" class="view hidden">
+        <header id="toolbar">
+            <div class="left-actions">
+                <button id="btn-back-to-list" class="btn secondary">← Back</button>
+                <div class="logo">MindFlow <span>AI</span></div>
+            </div>
+            <div class="map-info">
+                <h1 id="current-map-title">Central Idea</h1>
+                <button id="btn-edit-map-info" class="btn-icon" title="Edit Map Info">✎</button>
+            </div>
+            <div class="actions">
+                <span id="save-status" class="status-msg">All changes saved</span>
+                <select id="theme-select" class="btn secondary theme-select-common">
+                    <option value="default">Default Dark</option>
+                    <option value="neon">Neon Night</option>
+                    <option value="slate">Pro Slate</option>
+                    <option value="forest">Deep Forest</option>
+                    <option value="snow">Snow White</option>
+                    <option value="sky">Soft Sky</option>
+                    <option value="paper">Warm Paper</option>
+                </select>
+                <button id="capture-btn" class="btn secondary">Capture</button>
+                <button id="export-btn" class="btn secondary">View Data</button>
+                <button id="save-btn" class="btn primary">Force Save</button>
+            </div>
+        </header>
+
+        <main id="workspace">
+            <svg id="edges-layer">
+                <defs>
+                    <marker id="arrowhead" markerWidth="10" markerHeight="7" 
+                    refX="9" refY="3.5" orient="auto">
+                        <polygon points="0 0, 10 3.5, 0 7" fill="var(--primary)" />
+                    </marker>
+                </defs>
+            </svg>
+            <div id="canvas">
+                <div id="nodes-layer"></div>
+            </div>
+        </main>
+
+        <div id="side-guide" class="glass-panel">
+            <div class="guide-item" id="guide-navigate">
+                <span class="guide-label">노드 이동</span>
+                <span class="guide-key">Tab / Shift+Tab</span>
+            </div>
+            <div class="guide-item" id="guide-edit">
+                <span class="guide-label">노드 편집</span>
+                <span class="guide-key">Enter</span>
+            </div>
+            <div class="guide-item" id="guide-child">
+                <span class="guide-label">자식 추가</span>
+                <span class="guide-key">Insert</span>
+            </div>
+            <div class="guide-item" id="guide-sibling">
+                <span class="guide-label">형제 추가</span>
+                <span class="guide-key">Ctrl+Enter</span>
+            </div>
+            <div class="guide-item danger" id="guide-delete">
+                <span class="guide-label">삭제</span>
+                <span class="guide-key">Del</span>
+            </div>
+            <div class="guide-divider"></div>
+            <div class="guide-item" id="guide-move">
+                <span class="guide-label">위치 이동</span>
+                <span class="guide-key">↑↓←→</span>
+            </div>
+            <div class="guide-item" id="guide-move-fast">
+                <span class="guide-label">빠른 이동</span>
+                <span class="guide-key">Shift+↑↓←→</span>
+            </div>
+            <div class="guide-item" id="guide-reparent">
+                <span class="guide-label">부모 변경</span>
+                <span class="guide-key">Drag & Drop</span>
+            </div>
+            <div class="guide-divider"></div>
+            <div class="guide-item" id="guide-resize">
+                <span class="guide-label">노드 크기</span>
+                <span class="guide-key">+ / -</span>
+            </div>
+            <div class="guide-item" id="guide-save">
+                <span class="guide-label">저장</span>
+                <span class="guide-key">Ctrl+S</span>
+            </div>
+            <div class="guide-hint">맵 진입 시 루트 노드 자동 선택</div>
+        </div>
+
+        <div class="zoom-panel glass-panel">
+            <button id="zoom-in" title="Zoom In">+</button>
+            <div id="zoom-level">100%</div>
+            <button id="zoom-out" title="Zoom Out">-</button>
+            <button id="center-btn" title="Center View">⊕</button>
+        </div>
+    </div>
+
+    <!-- Application Logic -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dom-to-image/2.6.0/dom-to-image.min.js"></script>
+    <script type="module" src="/static/js/app.js?v=10"></script>
+</body>
+</html>
+</html>
