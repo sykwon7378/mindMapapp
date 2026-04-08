@@ -19,6 +19,10 @@ let transform = {
 };
 
 let activeNodeId = null; 
+let currentMarkdownUrl = null;
+let currentMarkdownRaw = "";
+let nodeToDelete = null; // Node scheduled for deletion
+let currentTheme = 'default';
 
 // DOM Elements
 const landingView = document.getElementById('landing-view');
@@ -83,44 +87,81 @@ async function init() {
     setupKeyboardShortcuts();
     setupDashboardDelegation();
     
-    // Load Global User Preferences (Theme)
+    // Load Global User Preferences (Theme, View Mode)
     await loadThemeSetting();
+    await loadListViewSetting();
     
     // Start at Landing Page
     showLanding();
 }
 
 async function loadThemeSetting() {
-    try {
-        const response = await fetch('/api/settings/theme');
-        const data = await response.json();
-        if (data && data.setting_value) {
-            const theme = data.setting_value;
-            applyTheme(theme);
-            // Update all theme selects to match
-            document.querySelectorAll('.theme-select-common').forEach(sel => {
-                sel.value = theme;
-            });
-        }
-    } catch (err) {
-        console.error("Failed to load theme setting:", err);
+    const theme = await loadUserSetting('theme');
+    if (theme) {
+        applyTheme(theme);
+        // Update all theme selects to match
+        document.querySelectorAll('.theme-select-common').forEach(sel => {
+            sel.value = theme;
+        });
     }
 }
 
+async function loadListViewSetting() {
+    const mode = await loadUserSetting('list_view_mode');
+    if (mode) {
+        currentListViewMode = mode;
+        // Update UI button states
+        if (mode === 'grid') {
+            btnViewGrid.classList.add('active');
+            btnViewTable.classList.remove('active');
+        } else if (mode === 'table') {
+            btnViewTable.classList.add('active');
+            btnViewGrid.classList.remove('active');
+        }
+    }
+}
+
+async function loadUserSetting(key) {
+    try {
+        const response = await fetch(`/api/settings/${key}`);
+        const data = await response.json();
+        if (data && data.setting_value) {
+            return data.setting_value;
+        }
+    } catch (err) {
+        console.error(`Failed to load setting ${key}:`, err);
+    }
+    return null;
+}
+
 function applyTheme(theme) {
+    currentTheme = theme;
     document.body.className = theme === 'default' ? '' : `theme-${theme}`;
     if (typeof renderEdges === 'function') renderEdges();
 }
 
+function getThemeDefaultColors() {
+    switch (currentTheme) {
+        case 'snow': return { bg: '#ffffff', text: '#334155' };
+        case 'sky': return { bg: '#f0f9ff', text: '#0369a1' };
+        case 'paper': return { bg: '#fefce8', text: '#854d0e' };
+        default: return { bg: '#1e293b', text: '#ffffff' };
+    }
+}
+
 async function saveThemeSetting(theme) {
+    await saveUserSetting('theme', theme);
+}
+
+async function saveUserSetting(key, value) {
     try {
         await fetch('/api/settings', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ key: 'theme', value: theme })
+            body: JSON.stringify({ key: key, value: value })
         });
     } catch (err) {
-        console.error("Failed to save theme setting:", err);
+        console.error(`Failed to save setting ${key}:`, err);
     }
 }
 
@@ -337,10 +378,11 @@ async function loadMapDetail(id) {
             transform.scale = 1;
             updateTransform();
 
-            // Auto-select root node for keyboard navigation
-            const rootNode = mapData.nodes.find(n => n.id === 'root' || n.isRoot);
-            if (rootNode) {
-                setTimeout(() => selectNode(rootNode.id), 100);
+            // Auto-select first node found or create one if empty
+            if (mapData.nodes.length === 0) {
+                createInitialRoot();
+            } else {
+                selectNode(mapData.nodes[0].id);
             }
         }
     } catch (err) {
@@ -410,7 +452,7 @@ function renderNodes() {
     nodesLayer.innerHTML = ''; 
     mapData.nodes.forEach(node => {
         const el = document.createElement('div');
-        el.className = 'node ' + (node.id === 'root' || node.isRoot ? 'root-node' : '');
+        el.className = 'node ' + (!node.parentId ? 'root-node' : '');
         if (node.id === activeNodeId) el.classList.add('selected');
         
         el.id = `node-${node.id}`;
@@ -428,7 +470,14 @@ function renderNodes() {
         // Inner Content
         let html = "";
         const titleStyle = node.titleSize ? `style="font-size: ${node.titleSize}px;"` : "";
-        html += `<div class="node-title" ${titleStyle}>${node.text}</div>`;
+        html += `<div class="node-title" ${titleStyle}>${node.text}`;
+        if (node.mdFile) {
+            const downloadName = node.mdName || "document.md";
+            html += ` <a href="${node.mdFile}" download="${downloadName}" class="node-md-link" title="Download: ${downloadName}">💾</a>`;
+            html += ` <span class="node-md-preview" data-url="${node.mdFile}" data-name="${downloadName}" title="Preview Markdown Content">👁️</span>`;
+        }
+        html += `</div>`;
+        
         if (node.image) {
             html += `<img src="${node.image}" class="node-image" />`;
         }
@@ -438,6 +487,22 @@ function renderNodes() {
         }
         html += `<div class="resize-handle"></div>`;
         el.innerHTML = html;
+        
+        // Prevent drag when clicking link
+        const link = el.querySelector('.node-md-link');
+        if (link) {
+            link.addEventListener('mousedown', (e) => e.stopPropagation());
+            link.addEventListener('click', (e) => e.stopPropagation());
+        }
+
+        const previewBtn = el.querySelector('.node-md-preview');
+        if (previewBtn) {
+            previewBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+            previewBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openMarkdownPreview(node.mdFile, node.mdName || node.text);
+            });
+        }
         
         // Image Interaction
         const img = el.querySelector('.node-image');
@@ -541,6 +606,22 @@ function showNodeDetail(node) {
         imgContainer.classList.remove('hidden');
     } else {
         imgContainer.classList.add('hidden');
+    }
+
+    const mdAttachment = document.getElementById('detail-md-attachment');
+    const mdFilename = document.getElementById('detail-md-filename');
+    const mdDownload = document.getElementById('btn-detail-md-download');
+    const mdPreviewBtn = document.getElementById('btn-detail-md-preview');
+
+    if (node.mdFile) {
+        mdAttachment.classList.remove('hidden');
+        const downloadName = node.mdName || "document.md";
+        mdFilename.innerText = downloadName;
+        mdDownload.href = node.mdFile;
+        mdDownload.download = downloadName;
+        mdPreviewBtn.onclick = () => openMarkdownPreview(node.mdFile, downloadName);
+    } else {
+        mdAttachment.classList.add('hidden');
     }
     
     // Reset panel to centered position on each open (at first)
@@ -946,13 +1027,42 @@ function openEditor(node, el) {
 
     editTitle.value = node.text;
     editDesc.value = node.description || "";
-    if (editBgColor) editBgColor.value = node.bgColor || "#1e293b";
-    if (editTextColor) editTextColor.value = node.textColor || "#ffffff";
+    
+    // Default from theme if node lacks specific colors
+    const themeDefaults = getThemeDefaultColors();
+    if (editBgColor) editBgColor.value = node.bgColor || node.color || themeDefaults.bg;
+    if (editTextColor) editTextColor.value = node.textColor || themeDefaults.text;
     
     const editTitleSize = document.getElementById('edit-title-size');
     const editDescSize = document.getElementById('edit-desc-size');
+    const btnMdUpload = document.getElementById('btn-md-upload');
+    const editMdFile = document.getElementById('edit-md-file');
+    const editMdFilename = document.getElementById('edit-md-filename');
+    const btnMdPreviewEditor = document.getElementById('btn-md-preview-editor');
+    const btnMdRemove = document.getElementById('btn-md-remove');
+
     if (editTitleSize) editTitleSize.value = node.titleSize || 16;
     if (editDescSize) editDescSize.value = node.descSize || 12;
+    
+    let currentMdFile = node.mdFile || null;
+    let currentMdName = node.mdName || "No file attached";
+
+    const updateMdInfo = (fileUrl, fileName) => {
+        currentMdFile = fileUrl;
+        currentMdName = fileName || "No file attached";
+        editMdFilename.innerText = currentMdName;
+        if (currentMdFile) {
+            btnMdRemove.classList.remove('hidden');
+            btnMdPreviewEditor.classList.remove('hidden');
+            btnMdUpload.innerText = "Change File";
+            btnMdPreviewEditor.onclick = () => openMarkdownPreview(currentMdFile, currentMdName);
+        } else {
+            btnMdRemove.classList.add('hidden');
+            btnMdPreviewEditor.classList.add('hidden');
+            btnMdUpload.innerText = "Add Markdown File";
+        }
+    };
+    updateMdInfo(currentMdFile, currentMdName);
     
     // Image Preview Setup
     const updatePreview = (data) => {
@@ -988,6 +1098,34 @@ function openEditor(node, el) {
     editImageFile.onchange = (e) => handleFile(e.target.files[0]);
     btnRemoveImage.onclick = () => updatePreview(null);
 
+    // Markdown File Upload
+    btnMdUpload.onclick = () => editMdFile.click();
+    editMdFile.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        try {
+            const response = await fetch('/api/upload', {
+                method: 'POST',
+                body: formData
+            });
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Server responded with ${response.status}: ${errorText}`);
+            }
+            const result = await response.json();
+            updateMdInfo(result.url, result.filename);
+            alert("File uploaded successfully.");
+        } catch (err) {
+            console.error("Upload failed", err);
+            alert("File upload failed: " + err.message);
+        }
+    };
+    btnMdRemove.onclick = () => updateMdInfo(null, null);
+
     // Paste Support
     const onPaste = (e) => {
         const items = (e.clipboardData || e.originalEvent.clipboardData).items;
@@ -1013,6 +1151,8 @@ function openEditor(node, el) {
         if (editTitleSize) node.titleSize = parseInt(editTitleSize.value) || 16;
         if (editDescSize) node.descSize = parseInt(editDescSize.value) || 12;
         
+        node.mdFile = currentMdFile;
+        node.mdName = currentMdName;
         node.image = currentImageData;
         
         window.removeEventListener('paste', onPaste);
@@ -1105,10 +1245,13 @@ function setupEventListeners() {
     let startPanY = 0;
 
     workspace.addEventListener('mousedown', (e) => {
-        if (e.target.closest('.node')) return; // Ignore nodes
-        
-        // Deselect
-        selectNode(null);
+        if (e.button !== 0) return; 
+        if (e.target.closest('.node')) return; 
+
+        if (e.target === workspace || e.target === canvas) {
+            selectNode(null);
+            workspace.focus(); 
+        }
         
         isPanning = true;
         startPanX = e.clientX - transform.x;
@@ -1209,6 +1352,24 @@ function setupEventListeners() {
         showLanding();
     });
 
+    // Delete Confirmation Listeners
+    btnDeleteConfirm.addEventListener('click', () => {
+        if (nodeToDelete) {
+            confirmDeletion(nodeToDelete);
+            nodeToDelete = null;
+        }
+        closeDeleteModal();
+    });
+
+    btnDeleteCancel.addEventListener('click', () => {
+        nodeToDelete = null;
+        closeDeleteModal();
+    });
+
+    deleteConfirmModal.addEventListener('mousedown', (e) => {
+        if (e.target === deleteConfirmModal) closeDeleteModal();
+    });
+
     // Map Info Editor Listeners
     btnEditMapInfo.addEventListener('click', () => {
         // Robust fetch
@@ -1283,6 +1444,7 @@ function setupEventListeners() {
         currentListViewMode = 'grid';
         btnViewGrid.classList.add('active');
         btnViewTable.classList.remove('active');
+        saveUserSetting('list_view_mode', 'grid');
         loadMapsList();
     });
 
@@ -1290,10 +1452,15 @@ function setupEventListeners() {
         currentListViewMode = 'table';
         btnViewTable.classList.add('active');
         btnViewGrid.classList.remove('active');
+        saveUserSetting('list_view_mode', 'table');
         loadMapsList();
     });
 
     setupNodeDetailLogic();
+    setupMarkdownPreviewLogic();
+
+    const btnAddRoot = document.getElementById('btn-add-root');
+    if (btnAddRoot) btnAddRoot.onclick = createIndependentRoot;
 }
 
 function zoomBy(factor) {
@@ -1324,6 +1491,15 @@ function updateTransform() {
 // Keyboard shortcuts for navigation and editing
 function setupKeyboardShortcuts() {
     window.addEventListener('keydown', (e) => {
+        // ── Alt+N: Create New Independent Root (Bypass browser Ctrl+N conflict) ──
+        if ((e.key === 'n' || e.key === 'N') && e.altKey) {
+            e.preventDefault();
+            if (landingView.classList.contains('hidden')) {
+                createIndependentRoot();
+            }
+            return;
+        }
+
         const lightboxOverlay = document.getElementById('image-lightbox');
         
         // Global Hotkeys
@@ -1349,9 +1525,11 @@ function setupKeyboardShortcuts() {
             deleteConfirmModal.classList.contains('visible') ||
             !document.getElementById('map-info-editor')?.classList.contains('hidden') ||
             !document.getElementById('node-detail-modal')?.classList.contains('hidden');
-        const isFormFocused = ['INPUT', 'TEXTAREA', 'BUTTON', 'SELECT'].includes(document.activeElement.tagName);
+        
+        // Only block Tab/navigation if user is typing in a text field
+        const isTyping = ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName);
 
-        if (isModalOpen || isFormFocused) {
+        if (isModalOpen || isTyping) {
             return;
         }
         
@@ -1361,6 +1539,7 @@ function setupKeyboardShortcuts() {
             navigateNodes(e.shiftKey ? -1 : 1);
             return;
         }
+
 
         // ── Insert: Add Child Node (no editor popup) ──
         if (e.key === 'Insert') {
@@ -1452,34 +1631,45 @@ function setupKeyboardShortcuts() {
 function navigateNodes(direction) {
     if (!mapData.nodes || mapData.nodes.length === 0) return;
 
-    // Build a flat ordered list: root first, then by parentId depth
     const ordered = buildNodeOrder();
     if (ordered.length === 0) return;
 
     let currentIdx = ordered.findIndex(n => n.id === activeNodeId);
     if (currentIdx === -1) {
-        // Select root or first node
         selectNode(ordered[0].id);
+        centerViewOnNode(ordered[0].id);
         return;
     }
 
     let nextIdx = currentIdx + direction;
     if (nextIdx < 0) nextIdx = ordered.length - 1;
     if (nextIdx >= ordered.length) nextIdx = 0;
+    
     selectNode(ordered[nextIdx].id);
+    centerViewOnNode(ordered[nextIdx].id);
+}
 
-    // Scroll the selected node into view if possible
-    const el = document.getElementById(`node-${ordered[nextIdx].id}`);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+function centerViewOnNode(nodeId) {
+    const node = mapData.nodes.find(n => n.id === nodeId);
+    if (!node) return;
+    
+    const nodeW = node.width || 180;
+    const nodeH = node.height || 60;
+    
+    // Smooth transition can be added if transform state supports it, 
+    // but direct update is more reliable for navigation.
+    transform.x = (window.innerWidth / 2) - (node.x + nodeW / 2) * transform.scale;
+    transform.y = (window.innerHeight / 2) - (node.y + nodeH / 2) * transform.scale;
+    updateTransform();
 }
 
 // Build node order: root → children (BFS)
 function buildNodeOrder() {
     const result = [];
-    const rootNode = mapData.nodes.find(n => n.id === 'root' || n.isRoot);
-    if (!rootNode) return mapData.nodes;
+    const rootNodes = mapData.nodes.filter(n => !n.parentId);
+    if (rootNodes.length === 0) return mapData.nodes;
 
-    const queue = [rootNode];
+    const queue = [...rootNodes];
     const visited = new Set();
 
     while (queue.length > 0) {
@@ -1502,8 +1692,54 @@ function buildNodeOrder() {
     return result;
 }
 
-function generateId() {
+function createId() {
     return Math.random().toString(36).substr(2, 9);
+}
+
+function createInitialRoot() {
+    const defaults = getThemeDefaultColors();
+    const newNode = {
+        id: createId(),
+        text: "Main Topic",
+        x: 0,
+        y: 0,
+        width: 200,
+        height: 60,
+        bgColor: defaults.bg,
+        textColor: defaults.text,
+        isRoot: true 
+    };
+    mapData.nodes.push(newNode);
+    render();
+    selectNode(newNode.id);
+    centerViewOnNode(newNode.id);
+}
+
+function createIndependentRoot() {
+    // Create a new root at the current center of the viewport
+    const x = -transform.x / transform.scale + (window.innerWidth / 2) / transform.scale;
+    const y = -transform.y / transform.scale + (window.innerHeight / 2) / transform.scale;
+
+    const defaults = getThemeDefaultColors();
+    const newNode = {
+        id: createId(),
+        text: "New Topic",
+        x: x,
+        y: y,
+        width: 180,
+        height: 60,
+        bgColor: defaults.bg,
+        textColor: defaults.text,
+        isRoot: true
+    };
+    mapData.nodes.push(newNode);
+    render();
+    selectNode(newNode.id);
+    saveStatus.innerText = "New root added";
+}
+
+function generateId() {
+    return createId();
 }
 
 function createChildNode(parentId) {
@@ -1511,13 +1747,18 @@ function createChildNode(parentId) {
     if (!parentNode) return;
     
     // Place it to the right
+    const defaults = getThemeDefaultColors();
     const newNode = {
         id: generateId(),
         parentId: parentId,
         text: "New Node",
         x: parentNode.x + 250,
         y: parentNode.y,
-        color: `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`
+        z: parentNode.z || 0,
+        width: 180,
+        height: 60,
+        bgColor: parentNode.bgColor || defaults.bg,
+        textColor: parentNode.textColor || defaults.text
     };
     
     mapData.nodes.push(newNode);
@@ -1531,13 +1772,18 @@ function createSiblingNode(nodeId) {
     if (!currentNode || !currentNode.parentId) return;
     
     // Place it below
+    const defaults = getThemeDefaultColors();
     const newNode = {
         id: generateId(),
         parentId: currentNode.parentId,
         text: "New Node",
         x: currentNode.x,
         y: currentNode.y + 100,
-        color: currentNode.color
+        z: currentNode.z || 0,
+        width: 180,
+        height: 60,
+        bgColor: currentNode.bgColor || defaults.bg,
+        textColor: currentNode.textColor || defaults.text
     };
     
     mapData.nodes.push(newNode);
@@ -1548,21 +1794,44 @@ function createSiblingNode(nodeId) {
 
 function deleteNode(nodeId) {
     const node = mapData.nodes.find(n => n.id === nodeId);
-    if (!node || node.id === 'root' || node.isRoot) return; // don't delete root
+    if (!node) return;
     
+    // Prevent deleting the very last node 
+    if (mapData.nodes.length <= 1) {
+        saveStatus.innerText = "Cannot delete the last node";
+        return;
+    }
+
+    nodeToDelete = nodeId;
+    deleteConfirmMsg.innerText = `자식 노드들을 포함해 "${node.text}" 노드를 삭제하시겠습니까?`;
+    deleteConfirmModal.classList.remove('hidden');
+    setTimeout(() => deleteConfirmModal.classList.add('visible'), 10);
+}
+
+function closeDeleteModal() {
+    deleteConfirmModal.classList.remove('visible');
+    setTimeout(() => deleteConfirmModal.classList.add('hidden'), 300);
+    workspace.focus();
+}
+
+function confirmDeletion(nodeId) {
     // Recursive delete helper to delete all children
     const deleteRecursive = (idToDelete) => {
-        // Find children
         const children = mapData.nodes.filter(n => n.parentId === idToDelete);
         children.forEach(c => deleteRecursive(c.id));
-        // Remove node
         mapData.nodes = mapData.nodes.filter(n => n.id !== idToDelete);
     };
-    
+
     deleteRecursive(nodeId);
-    activeNodeId = null; // deselect
-    render();
-    saveStatus.innerText = "Unsaved changes";
+    
+    if (activeNodeId === nodeId) {
+        activeNodeId = null;
+        render();
+    } else {
+        render();
+    }
+    
+    saveStatus.innerText = "Node deleted";
 }
 
 async function captureScreen() {
@@ -1600,3 +1869,252 @@ async function captureScreen() {
 
 // Fire init when DOM is loaded
 document.addEventListener('DOMContentLoaded', init);
+
+// ── Markdown Preview Logic ──
+function setupMarkdownPreviewLogic() {
+    const modal = document.getElementById('md-preview-modal');
+    const panel = document.getElementById('md-preview-panel');
+    const dragHeader = document.getElementById('md-preview-drag-header');
+    const closeBtn = document.getElementById('close-md-preview');
+    const closeBtn2 = document.getElementById('btn-md-preview-close');
+    const fullscreenBtn = document.getElementById('btn-md-fullscreen');
+
+    if (!modal || !panel) return;
+
+    const close = () => {
+        modal.classList.remove('visible');
+        setTimeout(() => {
+            modal.classList.add('hidden');
+            modal.style.display = 'none';
+            panel.classList.remove('is-fullscreen');
+        }, 300);
+    };
+
+    if (closeBtn) closeBtn.onclick = close;
+    if (closeBtn2) closeBtn2.onclick = close;
+
+    modal.addEventListener('mousedown', (e) => {
+        if (e.target === modal) close();
+    });
+
+    // ── Fullscreen Toggle ──
+    if (fullscreenBtn) {
+        fullscreenBtn.onclick = (e) => {
+            e.stopPropagation();
+            const isNowFullscreen = panel.classList.toggle('is-fullscreen');
+            
+            if (isNowFullscreen) {
+                fullscreenBtn.innerText = "❐"; // Restore icon
+                fullscreenBtn.title = "Exit Fullscreen";
+            } else {
+                fullscreenBtn.innerText = "⛶"; // Fullscreen icon
+                fullscreenBtn.title = "Toggle Fullscreen";
+            }
+        };
+    }
+
+    // ── Edit Mode Toggle ──
+    const editBtn = document.getElementById('btn-md-edit');
+    const saveBtn = document.getElementById('btn-md-save');
+    const cancelBtn = document.getElementById('btn-md-cancel');
+    const editArea = document.getElementById('md-edit-area');
+    const contentEl = document.getElementById('md-preview-content');
+
+    const toggleEditMode = (editing) => {
+        if (editing) {
+            editArea.value = currentMarkdownRaw;
+            contentEl.classList.add('hidden');
+            editArea.classList.remove('hidden');
+            editBtn.classList.add('hidden');
+            saveBtn.classList.remove('hidden');
+            cancelBtn.classList.remove('hidden');
+        } else {
+            contentEl.classList.remove('hidden');
+            editArea.classList.add('hidden');
+            editBtn.classList.remove('hidden');
+            saveBtn.classList.add('hidden');
+            cancelBtn.classList.add('hidden');
+        }
+    };
+
+    if (editBtn) editBtn.onclick = () => toggleEditMode(true);
+    if (cancelBtn) cancelBtn.onclick = () => toggleEditMode(false);
+    
+    if (saveBtn) {
+        saveBtn.onclick = async () => {
+            if (!currentMarkdownUrl) return;
+            const newContent = editArea.value;
+            
+            saveBtn.disabled = true;
+            saveBtn.innerText = "Saving...";
+            
+            try {
+                const response = await fetch('/api/files/update', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        path: currentMarkdownUrl,
+                        content: newContent
+                    })
+                });
+                
+                if (!response.ok) throw new Error("Failed to update file");
+                
+                currentMarkdownRaw = newContent;
+                if (window.marked) {
+                    contentEl.innerHTML = marked.parse(newContent);
+                } else {
+                    contentEl.innerHTML = `<pre>${newContent}</pre>`;
+                }
+                
+                toggleEditMode(false);
+                saveStatus.innerText = "Markdown updated";
+            } catch (err) {
+                alert("Error saving markdown: " + err.message);
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.innerText = "Save 💾";
+            }
+        };
+    }
+
+    // ── Drag to Move (Header) ──
+    let isDraggingPanel = false;
+    let dragStartX, dragStartY, panelStartLeft, panelStartTop;
+
+    const onDragStart = (e) => {
+        if (panel.classList.contains('is-fullscreen')) return;
+        if (e.target.closest('.header-actions')) return;
+        
+        e.preventDefault();
+        isDraggingPanel = true;
+
+        const rect = panel.getBoundingClientRect();
+        panel.style.transform = 'none';
+        panel.style.left = rect.left + 'px';
+        panel.style.top  = rect.top  + 'px';
+
+        dragStartX = e.clientX;
+        dragStartY = e.clientY;
+        panelStartLeft = rect.left;
+        panelStartTop  = rect.top;
+
+        window.addEventListener('mousemove', onDragMove);
+        window.addEventListener('mouseup', onDragEnd);
+    };
+
+    const onDragMove = (e) => {
+        if (!isDraggingPanel) return;
+        panel.style.left = (panelStartLeft + e.clientX - dragStartX) + 'px';
+        panel.style.top  = (panelStartTop  + e.clientY - dragStartY) + 'px';
+    };
+
+    const onDragEnd = () => {
+        isDraggingPanel = false;
+        window.removeEventListener('mousemove', onDragMove);
+        window.removeEventListener('mouseup', onDragEnd);
+    };
+
+    if (dragHeader) dragHeader.addEventListener('mousedown', onDragStart);
+
+    // ── 8-Direction Resize ──
+    const handles = panel.querySelectorAll('.detail-resize-handle');
+    handles.forEach(handle => {
+        handle.addEventListener('mousedown', (e) => {
+            if (panel.classList.contains('is-fullscreen')) return;
+            e.preventDefault();
+            e.stopPropagation();
+
+            const dir = handle.dataset.dir;
+            const startX = e.clientX;
+            const startY = e.clientY;
+            const rect = panel.getBoundingClientRect();
+
+            panel.style.transform = 'none';
+            panel.style.left   = rect.left + 'px';
+            panel.style.top    = rect.top  + 'px';
+
+            const startW = rect.width;
+            const startH = rect.height;
+            const startLeft = rect.left;
+            const startTop  = rect.top;
+
+            const MIN_W = 400, MIN_H = 300;
+
+            const onResizeMove = (me) => {
+                const dx = me.clientX - startX;
+                const dy = me.clientY - startY;
+
+                let newW = startW, newH = startH;
+                let newLeft = startLeft, newTop = startTop;
+
+                if (dir.includes('e')) newW = Math.max(MIN_W, startW + dx);
+                if (dir.includes('s')) newH = Math.max(MIN_H, startH + dy);
+                if (dir.includes('w')) {
+                    newW = Math.max(MIN_W, startW - dx);
+                    if (newW > MIN_W) newLeft = startLeft + dx;
+                }
+                if (dir.includes('n')) {
+                    newH = Math.max(MIN_H, startH - dy);
+                    if (newH > MIN_H) newTop = startTop + dy;
+                }
+
+                panel.style.width  = newW + 'px';
+                panel.style.height = newH + 'px';
+                panel.style.left   = newLeft + 'px';
+                panel.style.top    = newTop  + 'px';
+            };
+
+            const onResizeEnd = () => {
+                window.removeEventListener('mousemove', onResizeMove);
+                window.removeEventListener('mouseup', onResizeEnd);
+            };
+
+            window.addEventListener('mousemove', onResizeMove);
+            window.addEventListener('mouseup', onResizeEnd);
+        });
+    });
+}
+
+async function openMarkdownPreview(url, title) {
+    const modal = document.getElementById('md-preview-modal');
+    const titleEl = document.getElementById('md-preview-title');
+    const contentEl = document.getElementById('md-preview-content');
+
+    if (!modal || !contentEl) return;
+
+    titleEl.innerText = `Preview: ${title}`;
+    contentEl.innerHTML = '<div class="loading-spinner">Loading markdown content...</div>';
+    
+    // Reset edit mode
+    document.getElementById('md-edit-area').classList.add('hidden');
+    document.getElementById('md-preview-content').classList.remove('hidden');
+    document.getElementById('btn-md-edit').classList.remove('hidden');
+    document.getElementById('btn-md-save').classList.add('hidden');
+    document.getElementById('btn-md-cancel').classList.add('hidden');
+
+    modal.classList.remove('hidden');
+    modal.style.display = 'flex';
+    setTimeout(() => modal.classList.add('visible'), 10);
+
+    try {
+        const cacheBuster = url.includes('?') ? `&t=${Date.now()}` : `?t=${Date.now()}`;
+        const response = await fetch(url + cacheBuster);
+        if (!response.ok) throw new Error("Failed to fetch markdown file");
+        
+        const markdownText = await response.text();
+        currentMarkdownUrl = url;
+        currentMarkdownRaw = markdownText;
+        
+        // Use marked library (should be loaded in index.html)
+        if (window.marked) {
+            contentEl.innerHTML = marked.parse(markdownText);
+        } else {
+            contentEl.innerHTML = `<pre>${markdownText}</pre>`;
+        }
+    } catch (err) {
+        console.error("Markdown preview error", err);
+        contentEl.innerHTML = `<div class="error">마크다운을 불러오는데 실패했습니다: ${err.message}</div>`;
+    }
+}
+

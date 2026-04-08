@@ -214,6 +214,11 @@ body::before {
   background-color: var(--secondary-hover);
 }
 
+.btn.small-btn {
+  padding: 4px 10px;
+  font-size: 0.75rem;
+}
+
 /* ── Focus Highlight (Tab 키보드 탐색 시) ── */
 .btn:focus,
 .btn:focus-visible {
@@ -343,6 +348,18 @@ body::before {
   font-size: 0.95rem;
   font-weight: 600;
   line-height: 1.2;
+}
+
+.node-md-link {
+  text-decoration: none;
+  font-size: 0.8rem;
+  margin-left: 6px;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.node-md-link:hover {
+  opacity: 1;
 }
 
 .node-desc {
@@ -634,6 +651,12 @@ body::before {
   font-size: 1.25rem;
   font-weight: 600;
   color: var(--primary);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .close-btn {
@@ -1157,4 +1180,134 @@ body::before {
   stroke: var(--primary);
   stroke-width: 2;
   transition: d 0.1s ease-out;
+}
+
+/* ── Markdown Viewer & Preview Modal styles ── */
+.md-viewer-container {
+  display: flex;
+  flex-direction: column;
+  width: 900px; /* Default width */
+  height: 85vh;
+  max-width: none; /* Allow resizing */
+  position: absolute; /* Support free moving/resizing */
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  overflow: hidden;
+}
+
+/* Specific centering for md-preview-modal overlay similar to node-detail-modal */
+#md-preview-modal {
+  align-items: unset;
+  justify-content: unset;
+}
+
+#md-preview-drag-header {
+  cursor: move;
+  flex-shrink: 0;
+}
+
+/* Fullscreen State - Use ID for maximum specificity */
+#md-preview-panel.is-fullscreen {
+  width: 100vw !important;
+  height: 100vh !important;
+  top: 0 !important;
+  left: 0 !important;
+  transform: none !important;
+  border-radius: 0 !important;
+  z-index: 9999 !important;
+  max-width: none !important;
+  max-height: none !important;
+}
+
+#md-preview-panel.is-fullscreen .detail-resize-handle {
+  display: none !important;
+}
+
+#md-preview-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 30px;
+  background: #0d1117;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  line-height: 1.6;
+}
+
+/* Markdown styling - GitHub-like theme for dark mode */
+.markdown-body {
+  color: #c9d1d9;
+}
+.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4, .markdown-body h5, .markdown-body h6 {
+  margin-top: 24px;
+  margin-bottom: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--text-main);
+  border-bottom: 1px solid var(--glass-border);
+  padding-bottom: 0.3em;
+}
+.markdown-body p, .markdown-body blockquote, .markdown-body ul, .markdown-body ol, .markdown-body dl, .markdown-body table, .markdown-body pre {
+  margin-top: 0;
+  margin-bottom: 16px;
+}
+.markdown-body code {
+  padding: 0.2em 0.4em;
+  margin: 0;
+  font-size: 85%;
+  background-color: rgba(110, 118, 129, 0.4);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace;
+}
+.markdown-body pre {
+  padding: 16px;
+  overflow: auto;
+  font-size: 85%;
+  line-height: 1.45;
+  background-color: #161b22;
+  border-radius: 6px;
+}
+.markdown-body pre code {
+  background: transparent;
+  padding: 0;
+}
+.markdown-body a {
+  color: var(--primary);
+  text-decoration: none;
+}
+.markdown-body a:hover {
+  text-decoration: underline;
+}
+.markdown-body blockquote {
+  padding: 0 1em;
+  color: #8b949e;
+  border-left: 4px solid var(--border-color);
+}
+.markdown-body ul, .markdown-body ol {
+  padding-left: 2em;
+}
+.markdown-body table {
+  border-spacing: 0;
+  border-collapse: collapse;
+  width: 100%;
+}
+.markdown-body table th, .markdown-body table td {
+  padding: 6px 13px;
+  border: 1px solid var(--glass-border);
+}
+.markdown-body table tr {
+  background-color: #0d1117;
+  border-top: 1px solid var(--glass-border);
+}
+
+.node-md-preview {
+  text-decoration: none;
+  font-size: 0.8rem;
+  margin-left: 4px;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+  cursor: pointer;
+}
+.node-md-preview:hover {
+  opacity: 1;
 }

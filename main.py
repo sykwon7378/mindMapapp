@@ -1,8 +1,10 @@
 import os
 import json
+import shutil
+import uuid
 from typing import List, Dict, Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -17,6 +19,56 @@ app = FastAPI(title="Mind Map API")
 
 # Ensure essential directories exist
 os.makedirs("static", exist_ok=True)
+os.makedirs("static/uploads", exist_ok=True)
+
+@app.post("/api/upload")
+async def upload_file(file: UploadFile = File(...)):
+    # Generate unique filename to avoid collisions
+    ext = os.path.splitext(file.filename)[1]
+    unique_filename = f"{uuid.uuid4()}{ext}"
+    file_path = os.path.join("static/uploads", unique_filename)
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    return {"url": f"/static/uploads/{unique_filename}", "filename": file.filename}
+
+class UpdateFileRequest(BaseModel):
+    path: str
+    content: str
+
+@app.put("/api/files/update")
+async def update_file_content(payload: UpdateFileRequest):
+    # Pre-process path to get local file system path
+    target_path = payload.path
+    if target_path.startswith("/"):
+        target_path = target_path[1:]
+    
+    # Security: Only allow updating files in static/uploads/
+    if not target_path.startswith("static/uploads/"):
+        raise HTTPException(status_code=403, detail="Access denied: Can only update uploaded files.")
+    
+    if not os.path.exists(target_path):
+        raise HTTPException(status_code=404, detail="File not found")
+        
+    try:
+        with open(target_path, "w", encoding="utf-8") as f:
+            f.write(payload.content)
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/download")
+async def download_file(path: str, filename: str):
+    # Security check: Ensure path is within static/uploads
+    local_path = path[1:] if path.startswith("/") else path
+    if not local_path.startswith("static/uploads/"):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    if not os.path.exists(local_path):
+        raise HTTPException(status_code=404, detail="File not found")
+        
+    return FileResponse(local_path, filename=filename)
 
 # Database Configuration
 def get_db_connection():
@@ -133,7 +185,7 @@ async def create_map():
     try:
         cursor = connection.cursor()
         default_data = {
-            "nodes": [{"id": "root", "text": "New Central Idea", "x": -60, "y": -24, "isRoot": True}], 
+            "nodes": [{"id": "root", "text": "New Central Idea", "x": -60, "y": -24, "width": 220, "height": 80, "isRoot": True}], 
             "edges": []
         }
         # Explicitly set key_name to NULL to avoid issues with unique constraints on some MySQL configs

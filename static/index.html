@@ -17,8 +17,8 @@
             <h3>마인드맵 삭제</h3>
             <p id="delete-confirm-msg">정말 이 마인드맵을 삭제하시겠습니까?</p>
             <div class="modal-footer">
-                <button id="btn-delete-cancel" class="btn secondary">취소</button>
-                <button id="btn-delete-confirm" class="btn danger">삭제</button>
+                <button id="btn-delete-cancel" class="btn secondary" tabindex="1">취소</button>
+                <button id="btn-delete-confirm" class="btn danger" tabindex="2">삭제</button>
             </div>
         </div>
     </div>
@@ -37,51 +37,58 @@
     </div>
 
     <div id="editor-wrapper" class="hidden">
-        <div class="editor-container glass-panel">
+        <div class="editor-container glass-panel" style="resize: both; overflow: auto; min-width: 350px; min-height: 400px;">
             <h3>Edit Node</h3>
             <div class="input-group">
                 <label>Title</label>
                 <input type="text" id="edit-title" placeholder="Title" autocomplete="off" tabindex="1" />
             </div>
             <div class="input-group">
-                <label>Description</label>
-                <textarea id="edit-desc" placeholder="Enter detailed description..." spellcheck="false" tabindex="2"></textarea>
+                <label>Description & Markdown Attachment</label>
+                <textarea id="edit-desc" placeholder="Enter detailed description or Markdown content..." spellcheck="false" tabindex="2" style="min-height: 120px;"></textarea>
+                <div class="file-upload-wrapper" style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
+                    <button type="button" id="btn-md-upload" class="btn secondary" tabindex="3">Add Markdown File</button>
+                    <input type="file" id="edit-md-file" accept=".md" class="hidden" />
+                    <span id="edit-md-filename" class="guide-hint small">No file attached</span>
+                    <button type="button" id="btn-md-preview-editor" class="btn-icon hidden" title="Preview Attached Markdown">👁️</button>
+                    <button type="button" id="btn-md-remove" class="close-btn hidden" title="Remove attachment">&times;</button>
+                </div>
             </div>
             <div class="input-group row">
                 <div class="col">
                     <label>Background</label>
-                    <input type="color" id="edit-bg-color" value="#1e293b" tabindex="3" />
+                    <input type="color" id="edit-bg-color" value="#1e293b" tabindex="4" />
                 </div>
                 <div class="col">
                     <label>Text Color</label>
-                    <input type="color" id="edit-text-color" value="#ffffff" tabindex="4" />
+                    <input type="color" id="edit-text-color" value="#ffffff" tabindex="5" />
                 </div>
             </div>
             <div class="input-group row">
                 <div class="col">
                     <label>Title Size (px)</label>
-                    <input type="number" id="edit-title-size" value="16" min="8" max="72" tabindex="5" />
+                    <input type="number" id="edit-title-size" value="16" min="8" max="72" tabindex="6" />
                 </div>
                 <div class="col">
                     <label>Desc Size (px)</label>
-                    <input type="number" id="edit-desc-size" value="12" min="8" max="48" tabindex="6" />
+                    <input type="number" id="edit-desc-size" value="12" min="8" max="48" tabindex="7" />
                 </div>
             </div>
             <div class="input-group">
                 <label>Image Attachment</label>
                 <div class="image-upload-wrapper">
-                    <button id="btn-upload-image" class="btn secondary" tabindex="7">Upload/Paste Image</button>
+                    <button type="button" id="btn-upload-image" class="btn secondary" tabindex="8">Upload/Paste Image</button>
                     <input type="file" id="edit-image-file" accept="image/*" class="hidden" />
                     <div id="image-preview-container" class="hidden">
                         <img id="image-preview" src="" alt="Preview" />
-                        <button id="btn-remove-image" class="close-btn" tabindex="8">&times;</button>
+                        <button type="button" id="btn-remove-image" class="close-btn" tabindex="9">&times;</button>
                     </div>
                 </div>
                 <div class="guide-hint small">Ctrl+V to paste image from clipboard</div>
             </div>
             <div class="editor-actions">
-                <button id="btn-editor-cancel" class="btn secondary" tabindex="9">취소</button>
-                <button id="btn-editor-save" class="btn primary" tabindex="10">등록</button>
+                <button type="button" id="btn-editor-cancel" class="btn secondary" tabindex="10">취소</button>
+                <button type="button" id="btn-editor-save" class="btn primary" tabindex="11">등록</button>
             </div>
         </div>
     </div>
@@ -125,6 +132,47 @@
             </div>
             <div class="detail-body">
                 <p id="detail-desc">Node description goes here...</p>
+                <div id="detail-md-attachment" class="hidden" style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--glass-border);">
+                    <span class="guide-hint small">Attached Markdown: </span>
+                    <span id="detail-md-filename" style="font-weight: 500;">filename.md</span>
+                    <div style="display: inline-flex; gap: 8px; margin-left: 12px;">
+                        <a id="btn-detail-md-download" href="#" download class="btn secondary small-btn">Download 💾</a>
+                        <button id="btn-detail-md-preview" class="btn primary small-btn">Preview 👁️</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Markdown Preview Modal -->
+    <div id="md-preview-modal" class="modal-overlay hidden">
+        <div class="modal-content large-modal glass-panel md-viewer-container" id="md-preview-panel">
+            <!-- Resize handles -->
+            <div class="detail-resize-handle detail-resize-n"  data-dir="n"></div>
+            <div class="detail-resize-handle detail-resize-s"  data-dir="s"></div>
+            <div class="detail-resize-handle detail-resize-e"  data-dir="e"></div>
+            <div class="detail-resize-handle detail-resize-w"  data-dir="w"></div>
+            <div class="detail-resize-handle detail-resize-ne" data-dir="ne"></div>
+            <div class="detail-resize-handle detail-resize-nw" data-dir="nw"></div>
+            <div class="detail-resize-handle detail-resize-se" data-dir="se"></div>
+            <div class="detail-resize-handle detail-resize-sw" data-dir="sw"></div>
+
+            <div class="modal-header" id="md-preview-drag-header">
+                <h3 id="md-preview-title">Markdown Preview</h3>
+                <div class="header-actions">
+                    <button id="btn-md-edit" class="btn secondary small-btn" title="Edit Markdown">Edit ✎</button>
+                    <button id="btn-md-save" class="btn primary small-btn hidden" title="Save Changes">Save 💾</button>
+                    <button id="btn-md-cancel" class="btn secondary small-btn hidden" title="Cancel Editing">Cancel ✕</button>
+                    <button id="btn-md-fullscreen" class="btn-icon" title="Toggle Fullscreen">⛶</button>
+                    <button id="close-md-preview" class="close-btn">&times;</button>
+                </div>
+            </div>
+            <div id="md-preview-content" class="markdown-body">
+                <!-- Rendered content goes here -->
+            </div>
+            <textarea id="md-edit-area" class="markdown-body hidden" style="width: 100%; height: 100%; border: none; outline: none; background: transparent; color: inherit; padding: 16px; font-family: 'JetBrains Mono', monospace; font-size: 14px; resize: none;"></textarea>
+            <div class="modal-footer">
+                <button id="btn-md-preview-close" class="btn secondary">Close</button>
             </div>
         </div>
     </div>
@@ -185,6 +233,7 @@
                 </select>
                 <button id="capture-btn" class="btn secondary">Capture</button>
                 <button id="export-btn" class="btn secondary">View Data</button>
+                <button id="btn-add-root" class="btn secondary" title="Create a new independent topic (Alt+N)">+ New</button>
                 <button id="save-btn" class="btn primary">Force Save</button>
             </div>
         </header>
@@ -204,6 +253,10 @@
         </main>
 
         <div id="side-guide" class="glass-panel">
+            <div class="guide-item" id="guide-new-root">
+                <span class="guide-label">새 주제(Root)</span>
+                <span class="guide-key">Alt+N</span>
+            </div>
             <div class="guide-item" id="guide-navigate">
                 <span class="guide-label">노드 이동</span>
                 <span class="guide-key">Tab / Shift+Tab</span>
@@ -258,8 +311,9 @@
     </div>
 
     <!-- Application Logic -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dom-to-image/2.6.0/dom-to-image.min.js"></script>
-    <script type="module" src="/static/js/app.js?v=10"></script>
+    <script type="module" src="/static/js/app.js?v=12"></script>
 </body>
 </html>
 </html>
